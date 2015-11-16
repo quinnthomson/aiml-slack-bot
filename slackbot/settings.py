@@ -6,7 +6,12 @@ PLUGINS = [
     'slackbot.plugins',
 ]
 
-# API_TOKEN = '###token###'
+# Raises a KeyError if SLACK_TOKEN
+try:
+    API_TOKEN = os.environ['SLACK_TOKEN']
+except:
+    # API_TOKEN = '###token###'
+    print 'SLACK_TOKEN missing'
 
 '''
 If you use Slack Web API to send messages (with send_webapi() or reply_webapi()),
