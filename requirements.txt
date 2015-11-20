@@ -2,3 +2,5 @@ requests>=2.4.0
 websocket-client>=0.22.0
 importlib>=1.0.3
 slacker>=0.5.5
+aiml>=0.8.6
+enum34>=1.0.4

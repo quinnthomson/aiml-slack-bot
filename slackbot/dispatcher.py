@@ -4,6 +4,8 @@ import logging
 import re
 import time
 import traceback
+from enum import Enum
+import aimlResponder
 
 from slackbot.utils import to_utf8, WorkerPool
 
@@ -11,41 +13,74 @@ logger = logging.getLogger(__name__)
 
 AT_MESSAGE_MATCHER = re.compile(r'^\<@(\w+)\>:? (.*)$')
 
+class MessageType(Enum):
+    none = 0
+    generalMessage = 1
+    atBotMessage = 2
+    botMessage = 3
+
+class MessageInfo(object):
+    def __init__(self, messageType, message, sender, isChangedMessage, isRulesMessage):
+        self.messageType = messageType
+        self.message = message
+        self.sender = sender
+        self.isChangedMessage = isChangedMessage
+        self.isRulesMessage = isRulesMessage
 
 class MessageDispatcher(object):
+
     def __init__(self, slackclient, plugins):
         self._client = slackclient
         self._pool = WorkerPool(self.dispatch_msg)
         self._plugins = plugins
+        self.aimlBot = aimlResponder.aliceBot()
 
     def start(self):
         self._pool.start()
 
-    def dispatch_msg(self, msg):
-        category = msg[0]
-        msg = msg[1]
-        text = msg['text']
-        responded = False
+    def dispatch_msg(self, messageInfo):
+        print messageInfo.message
+
+        if messageInfo.isChangedMessage == False:
+            if messageInfo.isRulesMessage:
+                self.dispatchRulesMessage(messageInfo)
+            else:
+                self.dispatchAIMLMessage(messageInfo)
+
+    def dispatchAIMLMessage(self, messageInfo):
+        print messageInfo.sender
+        channel = self._client.get_channel(messageInfo.message['channel'])
+        print channel._body
+
+        if messageInfo.sender == 'quinn.thomson' or channel.name() == 'beepboop-lab':
+            if messageInfo.messageType == MessageType.atBotMessage:
+                self._client.rtm_send_message(messageInfo.message['channel'], self.aimlBot.respond(messageInfo.message['text']))
+
+    def dispatchRulesMessage(self, messageInfo):
+        text = messageInfo.message['text']
+
+        category = 'listen_to'
+        if messageInfo.messageType == MessageType.atBotMessage:
+            category = 'respond_to'
+
         for func, args in self._plugins.get_plugins(category, text):
             if func:
-                responded = True
                 try:
-                    func(Message(self._client, msg), *args)
+                    func(Message(self._client, messageInfo.message), *args)
                 except:
                     logger.exception('failed to handle message %s with plugin "%s"', text, func.__name__)
                     reply = '[%s] I have problem when handling "%s"\n' % (func.__name__, text)
                     reply += '```\n%s\n```' % traceback.format_exc()
-                    self._client.rtm_send_message(msg['channel'], reply)
+                    self._client.rtm_send_message(messageInfo.message['channel'], reply)
 
-        if not responded and category == 'respond_to':
-            self._default_reply(msg)
-
-    def _on_new_message(self, msg):
-        # ignore edits
+    def parseMessage(self, msg):
+        # determine if message was a changed message
         subtype = msg.get('subtype', '')
+        messageChanged = False
         if subtype == 'message_changed':
-            return
+            messageChanged = True
 
+        # determine who sent the message
         botname = self._client.login_data['self']['name']
         try:
             msguser = self._client.users.get(msg['user'])
@@ -56,16 +91,27 @@ class MessageDispatcher(object):
             else:
                 return
 
-        if username == botname or username == 'slackbot':
-            return
+        # early exit if the message if from the bot itself
+        if username == botname:
+            return MessageInfo(MessageType.botMessage, msg, botname, messageChanged, False)
 
-        msg_respond_to = self.filter_text(msg)
-        if msg_respond_to:
-            self._pool.add_task(('respond_to', msg_respond_to))
+        # determine if its an @message
+        msgRespondTo = self.msgRespondTo(msg)
+
+        # determine if the bot should reply to the slackbot listen_to or respond_to plugins
+        text = msg['text']
+        isRulesMessage = False
+        for category in ['respond_to', 'listen_to']:
+            for func, args in self._plugins.get_plugins(category, text):
+                if func:
+                    isRulesMessage = True
+
+        if msgRespondTo:
+            return MessageInfo(MessageType.atBotMessage, msgRespondTo, username, messageChanged, isRulesMessage)
         else:
-            self._pool.add_task(('listen_to', msg))
+            return MessageInfo(MessageType.generalMessage, msg, username, messageChanged, isRulesMessage)
 
-    def filter_text(self, msg):
+    def msgRespondTo(self, msg):
         text = msg.get('text', '')
         channel = msg['channel']
 
@@ -91,8 +137,9 @@ class MessageDispatcher(object):
             for event in events:
                 if event.get('type') != 'message':
                     continue
-                self._on_new_message(event)
-            time.sleep(1)
+                messageInfo = self.parseMessage(event)
+                self._pool.add_task(messageInfo)
+            time.sleep(1) # this is what prevents the bot from spewing responses out right away
 
     def _default_reply(self, msg):
         default_reply = [

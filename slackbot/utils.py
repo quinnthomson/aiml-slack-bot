@@ -66,8 +66,8 @@ class WorkerPool(object):
         for _ in xrange(self.nworker):
             thread.start_new_thread(self.do_work, tuple())
 
-    def add_task(self, msg):
-        self.queue.put(msg)
+    def add_task(self, messageInfo):
+        self.queue.put(messageInfo)
 
     def do_work(self):
         while True:

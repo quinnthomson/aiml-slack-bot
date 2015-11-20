@@ -145,3 +145,9 @@ class Channel(object):
             to_utf8(fpath),
             to_utf8(initial_comment)
         )
+
+    def name(self):
+        if 'name' in self._body:
+            return self._body['name']
+        else:
+            return ''
