@@ -25,12 +25,7 @@ def loadStandard(kernel):
 
 ####################################################################
 
-
-# @respond_to('.')
-# def hello_reply_formatting(message):
-#     # Format message with italic style
-#     message.reply(kernel.respond(message))
-
+# to run AIML in script, use this code
 # while True:
 #     userResponse = raw_input("> ")
 #     if userResponse == "exit()":
